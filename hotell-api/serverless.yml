@@ -1,0 +1,43 @@
+service: booking-api
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: eu-north-1
+  stage: dev
+
+functions:
+  listRooms:
+    handler: handler.listRooms
+    events:
+      - http:
+          path: rooms
+          method: get
+
+  createBooking:
+    handler: handler.createBooking
+    events:
+      - http:
+          path: bookings
+          method: post
+
+  cancelBooking:
+    handler: handler.cancelBooking
+    events:
+      - http:
+          path: bookings/{id}
+          method: delete
+
+resources:
+  Resources:
+    BookingTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: BookingTable
+        AttributeDefinitions:
+          - AttributeName: bookingId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: bookingId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
