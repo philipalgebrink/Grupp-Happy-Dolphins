@@ -5,6 +5,17 @@ provider:
   runtime: nodejs20.x
   region: eu-north-1
   stage: dev
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:DeleteItem
+            - dynamodb:Scan
+            - dynamodb:GetItem
+          Resource: 
+            - arn:aws:dynamodb:eu-north-1:*:table/BookingTable
 
 functions:
   listRooms:
@@ -33,7 +44,7 @@ resources:
     BookingTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: BookingTable
+        TableName: BookingTable  # Matchar namnet med tabellen i Lambda-koden
         AttributeDefinitions:
           - AttributeName: bookingId
             AttributeType: S
