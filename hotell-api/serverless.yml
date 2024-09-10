@@ -25,6 +25,13 @@ functions:
           path: rooms
           method: get
 
+  listAllBookings:
+    handler: handler.listAllBookings
+    events:
+      - http:
+          path: bookings
+          method: get
+
   createBooking:
     handler: handler.createBooking
     events:
