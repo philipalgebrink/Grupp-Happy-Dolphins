@@ -202,25 +202,60 @@ exports.listRooms = async (event) => {
 };
 
 exports.cancelBooking = async (event) => {
-    const bookingId = event.pathParameters.id;
+  const bookingId = event.pathParameters.id;
 
-    const params = {
-        TableName: 'BookingTable',
-        Key: { bookingId: bookingId }
-    };
+  // Parametrar för att hämta bokningen från DynamoDB
+  const getParams = {
+      TableName: 'BookingTable',
+      Key: { bookingId: bookingId }
+  };
 
-    try {
-        await dynamodb.delete(params).promise();
-        return {
-            statusCode: 200,
-            body: JSON.stringify({ message: "Booking canceled" })
-        };
-    } catch (error) {
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ message: "Error canceling booking", error: error.message })
-        };
-    }
+  try {
+      // Hämta bokningen från DynamoDB
+      const result = await dynamodb.get(getParams).promise();
+
+      if (!result.Item) {
+          return {
+              statusCode: 404,
+              body: JSON.stringify({ message: "Booking not found" })
+          };
+      }
+
+      const booking = result.Item;
+      const checkInDate = new Date(booking.checkInDate);
+      const currentDate = new Date();
+
+      // Beräkna skillnaden i tid mellan idag och incheckningsdatum
+      const timeDifference = checkInDate - currentDate;
+      const daysDifference = timeDifference / (1000 * 3600 * 24); // Omvandla millisekunder till dagar
+
+      // Kontrollera om det är mindre än 2 dagar kvar till incheckning
+      if (daysDifference < 2) {
+          return {
+              statusCode: 400,
+              body: JSON.stringify({ message: "Cannot cancel booking less than 2 days before check-in" })
+          };
+      }
+
+      // Om det är mer än 2 dagar kvar, avbryt bokningen
+      const deleteParams = {
+          TableName: 'BookingTable',
+          Key: { bookingId: bookingId }
+      };
+
+      await dynamodb.delete(deleteParams).promise();
+
+      return {
+          statusCode: 200,
+          body: JSON.stringify({ message: "Booking canceled" })
+      };
+
+  } catch (error) {
+      return {
+          statusCode: 500,
+          body: JSON.stringify({ message: "Error canceling booking", error: error.message })
+      };
+  }
 };
 exports.updateBooking = async (event) => {
     const bookingId = event.pathParameters.id; // Få bookingId från URL:en
