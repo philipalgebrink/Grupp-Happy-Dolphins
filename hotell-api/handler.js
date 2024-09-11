@@ -3,71 +3,101 @@ const AWS = require('aws-sdk');
 const dynamodb = new AWS.DynamoDB.DocumentClient();
 
 exports.createBooking = async (event) => {
-    const body = JSON.parse(event.body);
-  
-    // Hämta nödvändiga data från body
-    const guests = body.guests;
-    const rooms = body.rooms;
-    const name = body.name;
-    const email = body.email;
-    const checkInDate = body.checkInDate; // Nytt fält för incheckning
-    const checkOutDate = body.checkOutDate; // Nytt fält för utcheckning
-  
-    // Validera att alla obligatoriska fält finns med
-    if (!guests || !rooms || !name || !email || !checkInDate || !checkOutDate) {
+  const body = JSON.parse(event.body);
+
+  // Hämta nödvändiga data från body
+  const guests = body.guests;
+  const rooms = body.rooms;
+  const name = body.name;
+  const email = body.email;
+  const checkInDate = body.checkInDate;
+  const checkOutDate = body.checkOutDate;
+
+  // Validera att alla obligatoriska fält finns med
+  if (!guests || !rooms || !name || !email || !checkInDate || !checkOutDate) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        message: "Missing required fields: guests, rooms, name, email, checkInDate, checkOutDate"
+      }),
+    };
+  }
+
+  const roomTypes = {
+    "single": { capacity: 1, price: 500 },
+    "double": { capacity: 2, price: 1000 },
+    "suite": { capacity: 3, price: 1500 }
+  };
+
+  let totalCapacity = 0;
+  let totalPrice = 0;
+  let totalNewRooms = 0;
+
+  // Räkna ut total kapacitet och pris
+  rooms.forEach(room => {
+    const roomInfo = roomTypes[room.type];
+    if (roomInfo) {
+      totalCapacity += roomInfo.capacity * room.quantity;
+      totalPrice += roomInfo.price * room.quantity;
+      totalNewRooms += room.quantity; // Lägg till antalet nya rum
+    }
+  });
+
+  if (totalCapacity !== guests) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ message: "Room capacity does not match number of guests" }),
+    };
+  }
+
+  // Validera att check-in och check-out datum är giltiga
+  const checkIn = new Date(checkInDate);
+  const checkOut = new Date(checkOutDate);
+
+  if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ message: "Invalid date format for checkInDate or checkOutDate" }),
+    };
+  }
+
+  if (checkOut <= checkIn) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ message: "Check-out date must be after check-in date" }),
+    };
+  }
+
+  try {
+    // Kontrollera totala antalet bokade rum i DynamoDB
+    const scanParams = {
+      TableName: 'BookingTable',
+      ProjectionExpression: "rooms"
+    };
+
+    const scanResult = await dynamodb.scan(scanParams).promise();
+    let totalBookedRooms = 0;
+
+    // Beräkna totalt antal bokade rum
+    scanResult.Items.forEach(booking => {
+      booking.rooms.forEach(room => {
+        totalBookedRooms += room.quantity;
+      });
+    });
+
+    // Kontrollera om det totala antalet rum efter denna bokning skulle överstiga 20
+    if (totalBookedRooms + totalNewRooms > 20) {
       return {
         statusCode: 400,
         body: JSON.stringify({
-          message: "Missing required fields: guests, rooms, name, email, checkInDate, checkOutDate"
+          message: `Cannot book more rooms. Current total is ${totalBookedRooms}, and booking ${totalNewRooms} more would exceed the limit of 20 rooms.`
         }),
       };
     }
-  
-    const roomTypes = {
-      "single": { capacity: 1, price: 500 },
-      "double": { capacity: 2, price: 1000 },
-      "suite": { capacity: 3, price: 1500 }
-    };
-  
-    let totalCapacity = 0;
-    let totalPrice = 0;
-  
-    rooms.forEach(room => {
-      const roomInfo = roomTypes[room.type];
-      if (roomInfo) {
-        totalCapacity += roomInfo.capacity * room.quantity;
-        totalPrice += roomInfo.price * room.quantity;
-      }
-    });
-  
-    if (totalCapacity !== guests) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ message: "Room capacity does not match number of guests" }),
-      };
-    }
-  
-    // Validera att check-in och check-out datum är giltiga
-    const checkIn = new Date(checkInDate);
-    const checkOut = new Date(checkOutDate);
-  
-    if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ message: "Invalid date format for checkInDate or checkOutDate" }),
-      };
-    }
-  
-    if (checkOut <= checkIn) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ message: "Check-out date must be after check-in date" }),
-      };
-    }
-  
+
     // Skapa unikt bookingId
     const bookingId = Date.now().toString();
-  
+
     // Skapa objekt för att lägga till i DynamoDB
     const params = {
       TableName: 'BookingTable',
@@ -82,27 +112,28 @@ exports.createBooking = async (event) => {
         checkOutDate: checkOutDate
       }
     };
-  
-    try {
-      // Lägg till bokningen i DynamoDB
-      await dynamodb.put(params).promise();
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          message: "Booking successful",
-          bookingId: bookingId,
-          totalPrice: totalPrice,
-          checkInDate: checkInDate,
-          checkOutDate: checkOutDate
-        }),
-      };
-    } catch (error) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ message: "Error saving booking", error: error.message }),
-      };
-    }
-  };
+
+    // Lägg till bokningen i DynamoDB
+    await dynamodb.put(params).promise();
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: "Booking successful",
+        bookingId: bookingId,
+        totalPrice: totalPrice + " SEK",
+        checkInDate: checkInDate,
+        checkOutDate: checkOutDate
+      }),
+    };
+
+  } catch (error) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ message: "Error saving booking", error: error.message }),
+    };
+  }
+};
 
 exports.listAllBookings = async (event) => {
   const params = {
