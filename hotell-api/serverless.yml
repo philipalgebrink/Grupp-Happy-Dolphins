@@ -14,6 +14,7 @@ provider:
             - dynamodb:DeleteItem
             - dynamodb:Scan
             - dynamodb:GetItem
+            - dynamodb:UpdateItem
           Resource: 
             - arn:aws:dynamodb:eu-north-1:*:table/BookingTable
 
@@ -45,6 +46,13 @@ functions:
       - http:
           path: bookings/{id}
           method: delete
+      
+  updateBooking:
+    handler: handler.updateBooking
+    events:
+      - http:
+          path: bookings/{id}
+          method: put
 
 resources:
   Resources:

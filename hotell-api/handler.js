@@ -3,106 +3,106 @@ const AWS = require('aws-sdk');
 const dynamodb = new AWS.DynamoDB.DocumentClient();
 
 exports.createBooking = async (event) => {
-  const body = JSON.parse(event.body);
-  const guests = body.guests;
-  const rooms = body.rooms;
-  const name = body.name;
-  const email = body.email; // Lägg till namn
-
-  // Kontrollera att namn är angivet
-  if (!name) {
+    const body = JSON.parse(event.body);
+  
+    // Hämta nödvändiga data från body
+    const guests = body.guests;
+    const rooms = body.rooms;
+    const name = body.name;
+    const email = body.email;
+    const checkInDate = body.checkInDate; // Nytt fält för incheckning
+    const checkOutDate = body.checkOutDate; // Nytt fält för utcheckning
+  
+    // Validera att alla obligatoriska fält finns med
+    if (!guests || !rooms || !name || !email || !checkInDate || !checkOutDate) {
       return {
-          statusCode: 400,
-          body: JSON.stringify({ message: "Name is required" })
+        statusCode: 400,
+        body: JSON.stringify({
+          message: "Missing required fields: guests, rooms, name, email, checkInDate, checkOutDate"
+        }),
       };
-  }
-
-  const roomTypes = {
+    }
+  
+    const roomTypes = {
       "single": { capacity: 1, price: 500 },
       "double": { capacity: 2, price: 1000 },
       "suite": { capacity: 3, price: 1500 }
-  };
-
-  let totalRooms = 0;
-  let totalPrice = 0;
-
-  rooms.forEach(room => {
+    };
+  
+    let totalCapacity = 0;
+    let totalPrice = 0;
+  
+    rooms.forEach(room => {
       const roomInfo = roomTypes[room.type];
       if (roomInfo) {
-          totalRooms += room.quantity;
-          totalPrice += roomInfo.price * room.quantity;
+        totalCapacity += roomInfo.capacity * room.quantity;
+        totalPrice += roomInfo.price * room.quantity;
       }
-  });
-
-  if (totalRooms === 0) {
+    });
+  
+    if (totalCapacity !== guests) {
       return {
-          statusCode: 400,
-          body: JSON.stringify({ message: "No rooms specified in booking" })
+        statusCode: 400,
+        body: JSON.stringify({ message: "Room capacity does not match number of guests" }),
       };
-  }
-
-  // Hämta aktuellt antal bokade rum
-  const bookingParams = {
-      TableName: 'BookingTable',
-      ProjectionExpression: 'rooms'
-  };
-
-  let currentTotalRooms = 0;
-  try {
-      const data = await dynamodb.scan(bookingParams).promise();
-      data.Items.forEach(item => {
-          item.rooms.forEach(room => {
-              currentTotalRooms += room.quantity;
-          });
-      });
-
-      if (currentTotalRooms + totalRooms > 20) {
-          return {
-              statusCode: 400,
-              body: JSON.stringify({ message: "Cannot book more than 20 rooms in total" })
-          };
-      }
-  } catch (error) {
-      console.error('Error fetching current bookings:', error);
+    }
+  
+    // Validera att check-in och check-out datum är giltiga
+    const checkIn = new Date(checkInDate);
+    const checkOut = new Date(checkOutDate);
+  
+    if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
       return {
-          statusCode: 500,
-          body: JSON.stringify({ message: "Error fetching current bookings", error: error.message })
+        statusCode: 400,
+        body: JSON.stringify({ message: "Invalid date format for checkInDate or checkOutDate" }),
       };
-  }
-
-  // Skapa bokningen om kontrollen passerar
-  const bookingId = Date.now().toString();
-  const params = {
+    }
+  
+    if (checkOut <= checkIn) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ message: "Check-out date must be after check-in date" }),
+      };
+    }
+  
+    // Skapa unikt bookingId
+    const bookingId = Date.now().toString();
+  
+    // Skapa objekt för att lägga till i DynamoDB
+    const params = {
       TableName: 'BookingTable',
       Item: {
-          bookingId: bookingId,
-          name: name, // Lägg till namn
-          email: email,
-          guests: guests,
-          rooms: rooms,
-          totalPrice: totalPrice
+        bookingId: bookingId,
+        name: name,
+        email: email,
+        guests: guests,
+        rooms: rooms,
+        totalPrice: totalPrice,
+        checkInDate: checkInDate,
+        checkOutDate: checkOutDate
       }
-  };
-
-  try {
+    };
+  
+    try {
+      // Lägg till bokningen i DynamoDB
       await dynamodb.put(params).promise();
       return {
-          statusCode: 200,
-          body: JSON.stringify({
-              message: "Booking successful",
-              name: name,
-              email: email,
-              bookingId: bookingId,
-              totalPrice: totalPrice
-          })
+        statusCode: 200,
+        body: JSON.stringify({
+          message: "Booking successful",
+          bookingId: bookingId,
+          totalPrice: totalPrice,
+          checkInDate: checkInDate,
+          checkOutDate: checkOutDate
+        }),
       };
-  } catch (error) {
+    } catch (error) {
       return {
-          statusCode: 500,
-          body: JSON.stringify({ message: "Error saving booking", error: error.message })
+        statusCode: 500,
+        body: JSON.stringify({ message: "Error saving booking", error: error.message }),
       };
-  }
-};
+    }
+  };
 
 exports.listAllBookings = async (event) => {
   const params = {
@@ -188,6 +188,54 @@ exports.cancelBooking = async (event) => {
         return {
             statusCode: 500,
             body: JSON.stringify({ message: "Error canceling booking", error: error.message })
+        };
+    }
+};
+exports.updateBooking = async (event) => {
+    const bookingId = event.pathParameters.id; // Få bookingId från URL:en
+    const body = JSON.parse(event.body);
+
+    const params = {
+        TableName: 'BookingTable',
+        Key: { bookingId: bookingId }, // Identifiera bokningen att uppdatera
+        UpdateExpression: `set guests = :guests, rooms = :rooms, #name = :name, email = :email, checkInDate = :checkInDate, checkOutDate = :checkOutDate`,
+        ExpressionAttributeNames: {
+            '#name': 'name' // "name" är ett reserverat ord i DynamoDB, så vi måste använda ExpressionAttributeNames
+        },
+        ExpressionAttributeValues: {
+            ':guests': body.guests,
+            ':rooms': body.rooms,
+            ':name': body.name,
+            ':email': body.email,
+            ':checkInDate': body.checkInDate,
+            ':checkOutDate': body.checkOutDate
+        },
+        ReturnValues: "UPDATED_NEW" // Returnera de nya värdena efter uppdateringen
+    };
+
+    try {
+        const result = await dynamodb.update(params).promise();
+        return {
+            statusCode: 200,
+            body: JSON.stringify({
+                message: 'Booking updated successfully',
+                updatedAttributes: result.Attributes
+            }),
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        };
+    } catch (error) {
+        console.error('Error updating booking:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({
+                message: 'Error updating booking',
+                error: error.message
+            }),
+            headers: {
+                'Content-Type': 'application/json'
+            }
         };
     }
 };
