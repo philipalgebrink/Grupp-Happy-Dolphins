@@ -15,7 +15,7 @@ provider:
             - dynamodb:Scan
             - dynamodb:GetItem
             - dynamodb:UpdateItem
-          Resource: 
+          Resource:
             - arn:aws:dynamodb:eu-north-1:*:table/BookingTable
 
 functions:
@@ -46,7 +46,7 @@ functions:
       - http:
           path: bookings/{id}
           method: delete
-      
+
   updateBooking:
     handler: handler.updateBooking
     events:
@@ -59,7 +59,7 @@ resources:
     BookingTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: BookingTable  # Matchar namnet med tabellen i Lambda-koden
+        TableName: BookingTable
         AttributeDefinitions:
           - AttributeName: bookingId
             AttributeType: S
