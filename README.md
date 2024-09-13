@@ -13,13 +13,13 @@ Paket som installerats i VS Code: Serverless och AWS SDK.
 >I dynamoDB så krävs det en partition key : roomID (String)
 
 ### Endpoints:
-| Request       | Route           | Resultat |
+| Request       | URL           | Resultat |
 | ------------- |:-------------:| -----:|
-| GET      |/dev/rooms | Listar vilka rumstyper som finns tillgängliga och priser |
-| GET      |/dev/bookings | Listar nuvarande rumsbokningar |
-| POST      |/dev/bookings | Gör en rumsbokning (se nedan för formatet på POST-begäran) |
-| DELETE      |/dev/bookings/{id} | Tar bort rumsbokning med givet ID om det är mer än två dagar kvar till bokningsdatum |
-| PUT      |/dev/bookings/{id} | Ändrar rumsbokning med givet ID |
+| GET      |https://2i401tnlz3.execute-api.eu-north-1.amazonaws.com/dev/rooms | Listar vilka rumstyper som finns tillgängliga och priser |
+| GET      |https://2i401tnlz3.execute-api.eu-north-1.amazonaws.com/dev/bookings | Listar nuvarande rumsbokningar |
+| POST      |https://2i401tnlz3.execute-api.eu-north-1.amazonaws.com/dev/bookings | Gör en rumsbokning (se nedan för formatet på POST-begäran) |
+| DELETE      |https://2i401tnlz3.execute-api.eu-north-1.amazonaws.com/dev/bookings/{id} | Tar bort rumsbokning med givet ID om det är mer än två dagar kvar till incheckningsdatum |
+| PUT      |https://2i401tnlz3.execute-api.eu-north-1.amazonaws.com/dev/bookings/{id} | Ändrar rumsbokning med givet ID |
 
 
 
@@ -39,7 +39,7 @@ Paket som installerats i VS Code: Serverless och AWS SDK.
   "checkOutDate": "2024-09-25"
 }
 ```
-### Bekräftelse efter lyckad bokning:
+### Exempel på bekräftelse efter lyckad bokning:
 ```
 {
     "message": "Booking successful",
