@@ -25,7 +25,8 @@ Paket som installerats i VS Code: Serverless och AWS SDK.
 
 ### POST-begäran ska följa detta syntax:
 
-```{
+```
+{
   "guests": 4,
   "rooms": [
     {
