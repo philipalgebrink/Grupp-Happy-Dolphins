@@ -38,6 +38,20 @@ exports.createBooking = async (event) => {
       totalCapacity += roomInfo.capacity * room.quantity;
       totalPricePerDay += roomInfo.price * room.quantity;
       totalNewRooms += room.quantity;
+
+      // Check if the guests exceed the capacity per room type
+      if (guests > totalCapacity) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({
+            message: `Guest count exceeds total room capacity. The ${
+              room.quantity
+            } ${room.type} room(s) can only accommodate a maximum of ${
+              roomInfo.capacity * room.quantity
+            } guests.`,
+          }),
+        };
+      }
     }
   });
 
@@ -50,7 +64,7 @@ exports.createBooking = async (event) => {
     };
   }
 
-  // Validation
+  // Validation for check-in and check-out dates
   const checkIn = new Date(checkInDate);
   const checkOut = new Date(checkOutDate);
 
@@ -72,11 +86,9 @@ exports.createBooking = async (event) => {
     };
   }
 
-  // Calculate difference between checkIn and checkOut date
   const timeDifference = checkOut - checkIn;
   const daysDifference = Math.ceil(timeDifference / (1000 * 3600 * 24));
 
-  // Total price per day
   const totalPrice = totalPricePerDay * daysDifference;
 
   try {
@@ -143,6 +155,7 @@ exports.createBooking = async (event) => {
     };
   }
 };
+
 ///////////// List Bookings
 exports.listAllBookings = async (event) => {
   const params = {
@@ -271,25 +284,142 @@ exports.updateBooking = async (event) => {
   const bookingId = event.pathParameters.id;
   const body = JSON.parse(event.body);
 
-  const params = {
-    TableName: "BookingTable",
-    Key: { bookingId: bookingId },
-    UpdateExpression: `set guests = :guests, rooms = :rooms, #name = :name, email = :email, checkInDate = :checkInDate, checkOutDate = :checkOutDate`,
-    ExpressionAttributeNames: {
-      "#name": "name",
-    },
-    ExpressionAttributeValues: {
-      ":guests": body.guests,
-      ":rooms": body.rooms,
-      ":name": body.name,
-      ":email": body.email,
-      ":checkInDate": body.checkInDate,
-      ":checkOutDate": body.checkOutDate,
-    },
-    ReturnValues: "UPDATED_NEW",
+  const guests = body.guests;
+  const rooms = body.rooms;
+  const checkInDate = body.checkInDate;
+  const checkOutDate = body.checkOutDate;
+
+  if (!guests || !rooms || !checkInDate || !checkOutDate) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        message:
+          "Missing required fields: guests, rooms, checkInDate, checkOutDate",
+      }),
+    };
+  }
+
+  const roomTypes = {
+    single: { capacity: 1, price: 500 },
+    double: { capacity: 2, price: 1000 },
+    suite: { capacity: 3, price: 1500 },
   };
 
+  let totalCapacity = 0;
+  let totalPricePerDay = 0;
+  let totalUpdatedRooms = 0;
+  let roomBookingLimits = { single: 0, double: 0, suite: 0 };
+
+  // Calculate total capacity, price, and quantity per room type
+  rooms.forEach((room) => {
+    const roomInfo = roomTypes[room.type];
+    if (roomInfo) {
+      totalCapacity += roomInfo.capacity * room.quantity;
+      totalPricePerDay += roomInfo.price * room.quantity;
+      totalUpdatedRooms += room.quantity;
+      roomBookingLimits[room.type] += room.quantity;
+
+      // Check if guests exceed room capacity
+      if (guests > totalCapacity) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({
+            message: `Guest count exceeds total room capacity. The ${
+              room.quantity
+            } ${room.type} room(s) can only accommodate a maximum of ${
+              roomInfo.capacity * room.quantity
+            } guests.`,
+          }),
+        };
+      }
+    }
+  });
+
+  if (totalCapacity !== guests) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        message: "Room capacity does not match number of guests",
+      }),
+    };
+  }
+
+  const checkIn = new Date(checkInDate);
+  const checkOut = new Date(checkOutDate);
+
+  if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        message: "Invalid date format for checkInDate or checkOutDate",
+      }),
+    };
+  }
+
+  if (checkOut <= checkIn) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        message: "Check-out date must be after check-in date",
+      }),
+    };
+  }
+
+  const timeDifference = checkOut - checkIn;
+  const daysDifference = Math.ceil(timeDifference / (1000 * 3600 * 24));
+  const totalPrice = totalPricePerDay * daysDifference;
+
   try {
+    // Scan the table to get current bookings by room type
+    const scanParams = {
+      TableName: "BookingTable",
+      ProjectionExpression: "rooms",
+    };
+
+    const scanResult = await dynamodb.scan(scanParams).promise();
+
+    const currentRoomBookings = { single: 0, double: 0, suite: 0 };
+
+    scanResult.Items.forEach((booking) => {
+      if (booking.bookingId !== bookingId) {
+        booking.rooms.forEach((room) => {
+          if (currentRoomBookings[room.type] !== undefined) {
+            currentRoomBookings[room.type] += room.quantity;
+          }
+        });
+      }
+    });
+
+    // Check if the updated booking exceeds the room limits for each type
+    for (const roomType in roomBookingLimits) {
+      if (
+        currentRoomBookings[roomType] + roomBookingLimits[roomType] >
+        roomTypes[roomType].maxQuantity
+      ) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({
+            message: `Cannot book more ${roomType} rooms. Current total is ${currentRoomBookings[roomType]}, and booking ${roomBookingLimits[roomType]} more would exceed the limit of ${roomTypes[roomType].maxQuantity}.`,
+          }),
+        };
+      }
+    }
+
+    // Update the booking after validation
+    const params = {
+      TableName: "BookingTable",
+      Key: { bookingId: bookingId },
+      UpdateExpression: `set guests = :guests, rooms = :rooms, checkInDate = :checkInDate, checkOutDate = :checkOutDate, totalPrice = :totalPrice`,
+      ExpressionAttributeValues: {
+        ":guests": guests,
+        ":rooms": rooms,
+        ":checkInDate": checkInDate,
+        ":checkOutDate": checkOutDate,
+        ":totalPrice": totalPrice,
+      },
+      ReturnValues: "UPDATED_NEW",
+    };
+
     const result = await dynamodb.update(params).promise();
     return {
       statusCode: 200,
